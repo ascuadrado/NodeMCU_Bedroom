@@ -473,6 +473,24 @@ void handle_state() {
   server.send(200, "text/plain", String(bombillaON)); // Return state
 }
 
+void handle_brightness() {
+  server.send(200, "text/plain", String(slider2)); // Return state
+}
+
+void handle_set_brightness(){
+    slider2 = server.arg("brightness").toInt();
+    slider2 = slider2 % 1023;
+    Blynk.virtualWrite(5, slider2);
+}
+
+void handle_leds_on() {
+    
+}
+
+void handle_leds_off() {
+
+}
+
 void setup()
 {
     EEPROM.begin(512);
@@ -514,6 +532,9 @@ void setup()
     server.on("/status", handle_state);
     server.on("/actions/ON", handle_on);
     server.on("/actions/OFF", handle_off);
+    server.on("/brightness", handle_brightness);
+    server.on("/actions/brightness", handle_set_brightness);
+
     server.begin();
     makeTimers();
 }
