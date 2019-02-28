@@ -1,4 +1,5 @@
 // Luz habitación Alberto - Blynk
+
 /*
 Pines reales:
 Relé (D2)
@@ -35,11 +36,12 @@ slider2 - int
 #include <FastLED.h>
 #include <Arduino.h>
 #include <EEPROM.h>
-#include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
 #include <TimeLib.h>
 #include <WidgetRTC.h>
 #include <ESP8266WebServer.h>
+#include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 
 // Pin layouts (physical and virtual)
 #define relayPIN D2
@@ -74,6 +76,7 @@ CRGB color, dimmedColor, auxColor;
 int auxNumber, menu, counter, slider, secondCounter;
 int address, alarmaON, slider2, bombillaON;
 int timer1ID, timer2ID, timer3ID, timer4ID, timer5ID, timer6ID, checkTimer;
+int timer7ID;
 int wakeUpTimer;
 uint8_t ranN;
 int hora, minuto, margen;
@@ -99,13 +102,15 @@ void deleteTimers(){ // Delete all timers function
         case 6:
         timer.deleteTimer(timer6ID);
         break;
+        case 7:
+        timer.deleteTimer(timer7ID);
     }
 
     timer.deleteTimer(checkTimer);
     timer.deleteTimer(wakeUpTimer);
 }
 
-void saveVariables(){ // Save important variables into EEPROM
+void saveVariables(){ // Save important variables into EEPROM & sync APP
     address = 0;
 
     EEPROM.put(address, hora_obj);
@@ -122,12 +127,18 @@ void saveVariables(){ // Save important variables into EEPROM
 
     EEPROM.put(address, slider);
     address += sizeof(slider);
+    Blynk.virtualWrite(4, slider);
 
     EEPROM.put(address, slider2);
     address += sizeof(slider2);
+    Blynk.virtualWrite(5, slider2);
 
     EEPROM.commit();
 
+    Blynk.virtualWrite(0, menu);
+    Blynk.virtualWrite(6, bombillaON);
+
+/*
     Serial.println(" \nVariables saved: ");
     Serial.print("objHour - ");
     Serial.print(hora_obj);
@@ -145,6 +156,7 @@ void saveVariables(){ // Save important variables into EEPROM
     Serial.print(slider);
     Serial.print(" s2 - ");
     Serial.println(slider2);
+    */
 }
 
 void retrieveVariables(){ // Retrieve important variables from EEPROM and Initialize dependent variables
@@ -304,6 +316,22 @@ void modo6() // Meteorites mode
     FastLED.show();
 }
 
+void modo7() // Fiesta mode
+{
+    counter = counter % 2;
+    if (counter==0) {
+        for (int i = 0; i < NUM_LEDS; i++) {
+            leds[i] = CRGB(100,100,100);
+        }
+    }else{
+        for (int i = 0; i < NUM_LEDS; i++) {
+            leds[i] = CRGB(0,0,0);
+        }
+    }
+    FastLED.show();
+    counter++;
+}
+
 BLYNK_CONNECTED() {
     // Synchronize time on connection
     rtc.begin();
@@ -364,6 +392,9 @@ void makeTimers(){ // Create new timers
         case 6:
         timer6ID = timer.setInterval((1050 - slider)/20, modo6);
         break;
+        case 7:
+        timer7ID = timer.setInterval((1050 - slider)/20, modo7);
+        break;
     }
     if (alarmaON == 1){
         secondCounter = 0;
@@ -383,7 +414,6 @@ BLYNK_WRITE(MenuPIN){ // Menu changed
 }
 
 BLYNK_WRITE(SliderPIN){ // First slider changed (speed)
-
     deleteTimers();
     slider = param.asInt();
     saveVariables();
@@ -458,15 +488,15 @@ BLYNK_WRITE(bombillaVirtualPIN) { // Main light switch
 void handle_on() {
     bombillaON = 1;
     digitalWrite(bombillaPhysicalPIN, bombillaON);
-    Blynk.virtualWrite(6, bombillaON);
     server.send(200, "text/plain", String(bombillaON)); // Return 1
+    saveVariables();
 }
 
 void handle_off() {
     bombillaON = 0;
     digitalWrite(bombillaPhysicalPIN, bombillaON);
-    Blynk.virtualWrite(6, bombillaON);
     server.send(200, "text/plain", String(bombillaON)); // Return 1
+    saveVariables();
 }
 
 void handle_state() {
@@ -474,21 +504,82 @@ void handle_state() {
 }
 
 void handle_brightness() {
-  server.send(200, "text/plain", String(slider2)); // Return state
+  server.send(200, "text/plain", String(slider2/10)); // Return state
 }
 
 void handle_set_brightness(){
     slider2 = server.arg("brightness").toInt();
-    slider2 = slider2 % 1023;
-    Blynk.virtualWrite(5, slider2);
+    server.send(200, "text/plain", String(slider2)); // Return 1
+    slider2 = slider2 * 10;
+    color.maximizeBrightness(100);
+    dimmedColor = color;
+    dimmedColor.fadeToBlackBy(256 - slider2/4);
+    saveVariables();
 }
 
 void handle_leds_on() {
-    
+    deleteTimers();
+    menu = 4;
+    counter = 0;
+    makeTimers();
+    saveVariables();
+    server.send(200, "text/plain", String(1)); // Return 1
 }
 
 void handle_leds_off() {
+    deleteTimers();
+    menu = 1;
+    counter = 0;
+    makeTimers();
+    saveVariables();
+    server.send(200, "text/plain", String(0)); // Return 1
+}
 
+void handle_leds_status() {
+    if (menu == 4) {
+        server.send(200, "text/plain", String(1)); // Return 1
+    }else {
+        server.send(200, "text/plain", String(0)); // Return 1
+    }
+}
+
+void handle_fiesta_on() {
+    deleteTimers();
+    menu = 7;
+    counter = 0;
+    makeTimers();
+    saveVariables();
+    server.send(200, "text/plain", String(1)); // Return 1
+}
+
+void handle_fiesta_off() {
+    deleteTimers();
+    menu = 1;
+    counter = 0;
+    makeTimers();
+    saveVariables();
+    server.send(200, "text/plain", String(0)); // Return 1
+}
+
+void handle_fiesta_status() {
+    if (menu == 7) {
+        server.send(200, "text/plain", String(1)); // Return 1
+    }else {
+        server.send(200, "text/plain", String(0)); // Return 1
+    }
+}
+
+void handle_fiesta_brightness() {
+    server.send(200, "text/plain", String(slider/10)); // Return state
+}
+
+void handle_fiesta_set_brightness() {
+    deleteTimers();
+    slider = server.arg("brightness").toInt();
+    server.send(200, "text/plain", String(slider)); // Return 1
+    slider = slider * 10;
+    saveVariables();
+    makeTimers();
 }
 
 void setup()
@@ -532,11 +623,43 @@ void setup()
     server.on("/status", handle_state);
     server.on("/actions/ON", handle_on);
     server.on("/actions/OFF", handle_off);
+
+    server.on("/LEDsStatus", handle_leds_status);
+    server.on("/actions/LEDsON", handle_leds_on);
+    server.on("/actions/LEDsOFF", handle_leds_off);
     server.on("/brightness", handle_brightness);
     server.on("/actions/brightness", handle_set_brightness);
 
+    server.on("/actions/fiestaOn", handle_fiesta_on);
+    server.on("/actions/fiestaOff", handle_fiesta_off);
+    server.on("/fiestaStatus", handle_fiesta_status);
+    server.on("/fiestaBrightness", handle_fiesta_brightness);
+    server.on("/actions/fiestaBrightness", handle_fiesta_set_brightness);
+
     server.begin();
     makeTimers();
+
+    ArduinoOTA.onStart([]() {
+        Serial.println("Start");
+    });
+    ArduinoOTA.onEnd([]() {
+        Serial.println("End");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\n", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+        else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+        else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+        else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+        else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+    ArduinoOTA.begin();
+
+    //MDNS.begin("nodemcu");
+
 }
 
 void loop()
@@ -544,4 +667,5 @@ void loop()
     Blynk.run(); // Blynk functions
     timer.run(); // Timers
     server.handleClient(); // Incoming client connections
+    ArduinoOTA.handle();
 }
