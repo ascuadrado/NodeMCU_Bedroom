@@ -1,506 +1,196 @@
 // Luz habitación Alberto - Blynk
+
 /*
-Pines reales:
-Relé (D2)
-LED (D1) - 130 luces
-
 Pines virtuales:
-Menú (V0):
-Luces OFF
-Luces tranquilas,
-Luces personalizadas
-FirePlace personalizado
 
-Slider (V4) (1023)
-Slider (V5) (1023)
-RGB (V2) (255)
-
-EEPROM:
-hora_obj - int
-minuto_obj - int
-alarmaON - int
-color - CRGB
-slider - int
-slider2 - int
 
 */
 
 
 // FastLED Configuration
-#define FASTLED_ALLOW_INTERRUPTS 0
-#define FASTLED_ESP8266_RAW_PIN_ORDER
-#define NUM_LEDS 135
+#define FASTLED_ALLOW_INTERRUPTS 0      // Avoid flickering
+#define FASTLED_ESP8266_RAW_PIN_ORDER   // Use D0,...
+#define NUM_LEDS 135                    // Number of LEDs in strip
 
 // Libraries
-#include <FastLED.h>
-#include <Arduino.h>
-#include <EEPROM.h>
-#include <ESP8266WiFi.h>
-#include <BlynkSimpleEsp8266.h>
-#include <TimeLib.h>
-#include <WidgetRTC.h>
-#include <ESP8266WebServer.h>
+#include <Arduino.h>                // Basic arduino library
+#include <FastLED.h>                // Control LEDs
+#include <EEPROM.h>                 // Save variables in non-volatile memory
+#include <BlynkSimpleEsp8266.h>     // Blynk app iOS
+#include <WidgetRTC.h>              // Keep track of time
+#include <ESP8266WebServer.h>       // WebServer
+#include <ESP8266mDNS.h>            // mDNS service to not use IP
+#include <WiFiUdp.h>                // Udp for Over The Air update
+#include <ArduinoOTA.h>             // Over The Air updates
 
 // Pin layouts (physical and virtual)
-#define relayPIN D2
-#define DATA_PIN D1
-#define MenuPIN V0
-#define AlarmaPIN V1
-#define RGBPIN V2
-#define SliderPIN V4
-#define Slider2PIN V5
-#define RelayPIN D6
-#define timePIN V3
-#define bombillaVirtualPIN V6
-#define bombillaPhysicalPIN D6
+#define relayPIN D6 // Relay for main bedroom light
+#define DATA_PIN D1 // Data pin for WS8212b LED strip
 
 // WiFi settings
-char auth[] = "b50f7cd1e4c04fdd9ec385f0cc1a1a24";
-//char ssid[] = "Iphone 7 de Alberto";
-//char pass[] = "albertosanchez";
-char ssid[] = "MOVISTAR_52B8(2)";
-char pass[] = "WQ8hFl99w5VW3djsRVYb";
+char auth[] = "b50f7cd1e4c04fdd9ec385f0cc1a1a24";   // Blynk auth token
+char ssid[] = "MOVISTAR_52B8(2)";                   // Wifi AP
+char pass[] = "WQ8hFl99w5VW3djsRVYb";               // Wifi Password
 
 // Initialize variables
-CRGB leds[NUM_LEDS];
-CRGB auxColors[128];
-ESP8266WebServer server(80);
-WidgetRTC rtc;
-WidgetTerminal terminal(V1);
-BlynkTimer timer;
+CRGB leds[NUM_LEDS];            // Main LED strip
+CRGB auxColors[128];            // Aux colors for effects
+ESP8266WebServer server(80);    // Web server
+WidgetRTC rtc;                  // TimeKeeping rtc
+BlynkTimer timer;               // Timer for tasks
 
-CRGB color, dimmedColor, auxColor;
+CRGB color, dimmedColor, auxColor; // More auxiliary colors
+int objHour, objMin;              // Time variables
 
-int auxNumber, menu, counter, slider, secondCounter;
-int address, alarmaON, slider2, bombillaON;
-int timer1ID, timer2ID, timer3ID, timer4ID, timer5ID, timer6ID, checkTimer;
-int wakeUpTimer;
+int menu, vSlider, hSlider, alarmON, relayON; // Important variables
+
+int auxNumber, counter, secondCounter, margen; // Auxiliary variables
 uint8_t ranN;
-int hora, minuto, margen;
-int hora_obj, minuto_obj;
 
-void deleteTimers(){ // Delete all timers function
-    switch(menu){
-        case 1:
-        timer.deleteTimer(timer1ID);
-        break;
-        case 2:
-        timer.deleteTimer(timer2ID);
-        break;
-        case 3:
-        timer.deleteTimer(timer3ID);
-        break;
-        case 4:
-        timer.deleteTimer(timer4ID);
-        break;
-        case 5:
-        timer.deleteTimer(timer5ID);
-        break;
-        case 6:
-        timer.deleteTimer(timer6ID);
-        break;
+// Timer IDs
+int timers[15];
+
+void deleteTimers(){ // Delete all timers
+    for(int i=0; i<15;i++){
+        timer.deleteTimer(timers[i]);
     }
-
-    timer.deleteTimer(checkTimer);
-    timer.deleteTimer(wakeUpTimer);
 }
 
+#include "LEDHeader.h"              // LED programs and functions
+
 void saveVariables(){ // Save important variables into EEPROM
-    address = 0;
-
-    EEPROM.put(address, hora_obj);
-    address += sizeof(hora_obj);
-
-    EEPROM.put(address, minuto_obj);
-    address += sizeof(minuto_obj);
-
-    EEPROM.put(address, alarmaON);
-    address += sizeof(alarmaON);
+    int address = 0;
 
     EEPROM.put(address, color);
     address += sizeof(color);
 
-    EEPROM.put(address, slider);
-    address += sizeof(slider);
+    EEPROM.put(address, objHour);
+    address += sizeof(objHour);
 
-    EEPROM.put(address, slider2);
-    address += sizeof(slider2);
+    EEPROM.put(address, objMin);
+    address += sizeof(objMin);
+
+    EEPROM.put(address, menu);
+    address += sizeof(menu);
+
+    EEPROM.put(address, vSlider);
+    address += sizeof(vSlider);
+
+    EEPROM.put(address, hSlider);
+    address += sizeof(hSlider);
+
+    EEPROM.put(address, alarmON);
+    address += sizeof(alarmON);
+
+    EEPROM.put(address, relayON);
+    address += sizeof(relayON);
 
     EEPROM.commit();
-
-    Serial.println(" \nVariables saved: ");
-    Serial.print("objHour - ");
-    Serial.print(hora_obj);
-    Serial.print(" objMin - ");
-    Serial.print(minuto_obj);
-    Serial.print(" alarmON - ");
-    Serial.print(alarmaON);
-    Serial.print(" color - (");
-    Serial.print(color.r);
-    Serial.print(",");
-    Serial.print(color.g);
-    Serial.print(",");
-    Serial.print(color.b);
-    Serial.print(") s1 - ");
-    Serial.print(slider);
-    Serial.print(" s2 - ");
-    Serial.println(slider2);
 }
 
-void retrieveVariables(){ // Retrieve important variables from EEPROM and Initialize dependent variables
-    address = 0;
-    EEPROM.get(address, hora_obj);
-    address += sizeof(hora_obj);
-    EEPROM.get(address, minuto_obj);
-    address += sizeof(minuto_obj);
-    EEPROM.get(address, alarmaON);
-    address += sizeof(alarmaON);
+// Retrieve important variables from EEPROM and Initialize dependent variables
+void retrieveVariables(){
+    int address = 0;
     EEPROM.get(address, color);
     address += sizeof(color);
-    EEPROM.get(address, slider);
-    address += sizeof(slider);
-    EEPROM.get(address, slider2);
-    address += sizeof(slider2);
+    EEPROM.get(address, objHour);
+    address += sizeof(objHour);
+    EEPROM.get(address, objMin);
+    address += sizeof(objMin);
+    EEPROM.get(address, menu);
+    address += sizeof(menu);
+    EEPROM.get(address, vSlider);
+    address += sizeof(vSlider);
+    EEPROM.get(address, hSlider);
+    address += sizeof(hSlider);
+    EEPROM.get(address, alarmON);
+    address += sizeof(alarmON);
+    EEPROM.get(address, relayON);
+    address += sizeof(relayON);
 
-    if(menu<1){
-        menu = 1;
-    }
-
-    menu = 1;
     counter = 0;
     secondCounter = 0;
+    auxNumber = 0;
+    ranN = 0;
     color.maximizeBrightness(100);
     dimmedColor = color;
-    dimmedColor.fadeToBlackBy(256 - slider2/4);
-
-    Serial.println(" \nVariables retrieved: ");
-    Serial.print("objHour - ");
-    Serial.print(hora_obj);
-    Serial.print(" objMin - ");
-    Serial.print(minuto_obj);
-    Serial.print(" alarmON - ");
-    Serial.print(alarmaON);
-    Serial.print(" color - (");
-    Serial.print(color.r);
-    Serial.print(",");
-    Serial.print(color.g);
-    Serial.print(",");
-    Serial.print(color.b);
-    Serial.print(") s1 - ");
-    Serial.print(slider);
-    Serial.print(" s2 - ");
-    Serial.println(slider2);
-}
-
-void modo1() // OFF
-{
-    for(int i=0;i<NUM_LEDS;i++){
-        leds[i] = CRGB(0,0,0);
-    }
-    FastLED.show();
-}
-
-void modo2() // Ambient lights effect
-{
-    counter = counter%80;
-
-    if (counter == 0){
-        ranN = random8(10, NUM_LEDS-10);
-    }else if (counter == 40) {
-        ranN = random8(NUM_LEDS);
-    }
-
-    for(int i = 0; i < NUM_LEDS; i++){
-        auxColor = dimmedColor;
-        auxColor.fadeToBlackBy(255*(1-0.1/((i-ranN)*(i-ranN)/100+1)));
-        leds[i] = leds[i] +
-        auxColor;
-    }
-
-    if (counter%2==0) {
-        for(int i = 0; i < NUM_LEDS; i++){
-            leds[i].fadeToBlackBy(1);
-        }
-    }
-
-    counter++;
-    FastLED.show();
-}
-
-void modo3() // Moving waves
-{
-    counter ++;
-    counter = counter%20;
-
-    leds[0] = color;
-    leds[0].fadeToBlackBy(15*counter);
-    leds[0].fadeToBlackBy(256 - slider2/4);
-
-    for(int i=NUM_LEDS-1;i>0;i--){
-        leds[i] = leds[i-1];
-    }
-
-    FastLED.show();
-}
-
-void modo4() // Fixed Color
-{
-    for(int i = 0; i < NUM_LEDS; i++){
-        leds[i] = dimmedColor;
-    }
-    FastLED.show();
-}
-
-void modo5() // Breathing mode
-{
-    counter = counter%255; // (counter = 0-255)
-
-    if(counter == 0){
-        auxColor = dimmedColor;
-        auxNumber = auxColor.getLuma();
-    }else if (counter <= 127) {
-        if (auxNumber < 20){
-            if (counter%3==0) {
-                auxColor.fadeToBlackBy(1);
-            }
-        } else if (auxNumber < 50){
-            if (counter%2==0) {
-                auxColor.fadeToBlackBy(1);
-            }
-        } else{
-            auxColor.fadeToBlackBy(1);
-        }
-
-        auxColors[counter] = auxColor;
-    }else{
-        auxColor = auxColors[255 - counter];
-    }
-
-    for(int i = 0; i < NUM_LEDS; i++){
-        leds[i] = auxColor;
-    }
-    FastLED.show();
-    counter++;
-}
-
-void modo6() // Meteorites mode
-{
-    counter = counter%40;
-
-    if (counter==0) {
-        ranN = random8(10, NUM_LEDS-10);
-        for(int i = 0; i < NUM_LEDS; i++){
-            auxColor = dimmedColor;
-            auxColor.fadeToBlackBy(255*(1-1/((i-ranN)*(i-ranN)/200+1)));
-            leds[i] = leds[i] + auxColor;
-            //leds[i] = leds[i] + dimColor(dimmedColor, 0.9/((i-ranN)*(i-ranN)/100+1));
-        }
-    }
-
-    for(int i = 0; i < NUM_LEDS; i++){
-        leds[i].fadeToBlackBy(1);
-    }
-    counter++;
-    FastLED.show();
-}
-
-BLYNK_CONNECTED() {
-    // Synchronize time on connection
-    rtc.begin();
-}
-
-void wakeUp(){ // Wake Up routine
-
-    CRGB light = CRGB(secondCounter, secondCounter, secondCounter);
-
-    for (int j = 0; j<NUM_LEDS; j++){
-        leds[j] = light;
-        FastLED.show();
-        delay(40);
-    }
-
-    if (secondCounter > 20){
-        digitalWrite(relayPIN, HIGH);
-        delay(100000);
-        digitalWrite(relayPIN, LOW);
-
-        alarmaON = 0;
-        deleteTimers();
-    }
-
-    secondCounter++;
+    auxColor = color;
+    dimmedColor.fadeToBlackBy(256 - hSlider/4);
 }
 
 void check(){ // Check time till wakeUp
-    hora = hour();
-    minuto = minute();
-    margen = (hora_obj-hora)*60 + (minuto_obj-minuto); // Margen en minutos
+    margen = (objHour-hour())*60
+    + (objMin-minute()); // Margin in minutes
 
     if (margen <= 4 && margen > -5) {
         // Begin routine
         deleteTimers();
-        secondCounter = 1;
-        wakeUpTimer = timer.setInterval(10000L, wakeUp);
+        timers[10] = timer.setInterval(10000L, wakeUp);
     }
 }
 
 void makeTimers(){ // Create new timers
+    counter = 0;
+    secondCounter = 0;
+
     switch(menu){
         case 1:
-        timer1ID = timer.setInterval(100L, modo1);
+        timers[1] = timer.setInterval(100L, modo1);
         break;
         case 2:
-        timer2ID = timer.setInterval((1050 - slider)/20, modo2);
+        timers[2] = timer.setInterval((1050 - vSlider)/20, modo2);
         break;
         case 3:
-        timer3ID = timer.setInterval((1050 - slider)/20, modo3);
+        timers[3] = timer.setInterval((1050 - vSlider)/20, modo3);
         break;
         case 4:
-        timer4ID = timer.setInterval(250L, modo4);
+        timers[4] = timer.setInterval(250L, modo4);
         break;
         case 5:
-        timer5ID = timer.setInterval((1050 - slider)/20, modo5);
+        timers[5] = timer.setInterval((1050 - vSlider)/20, modo5);
         break;
         case 6:
-        timer6ID = timer.setInterval((1050 - slider)/20, modo6);
+        timers[6] = timer.setInterval((1050 - vSlider)/20, modo6);
+        break;
+        case 7:
+        timers[7] = timer.setInterval((1050 - vSlider)/20, modo7);
         break;
     }
-    if (alarmaON == 1){
-        secondCounter = 0;
-        checkTimer = timer.setInterval(60000L, check);
+    if (alarmON == 1){
+        timers[11] = timer.setInterval(60000L, check);
     }
 }
 
-BLYNK_WRITE(MenuPIN){ // Menu changed
-    deleteTimers();
-
-    menu = param.asInt();
-    counter = 0;
-
-    makeTimers();
-
-    saveVariables();
-}
-
-BLYNK_WRITE(SliderPIN){ // First slider changed (speed)
-
-    deleteTimers();
-    slider = param.asInt();
-    saveVariables();
-    makeTimers();
-}
-
-BLYNK_WRITE(Slider2PIN){ // Second slider changed (intensity)
-    slider2 = param.asInt();
-    color.maximizeBrightness(100);
-    dimmedColor = color;
-    dimmedColor.fadeToBlackBy(256 - slider2/4);
-    saveVariables();
-}
-
-BLYNK_WRITE(RGBPIN){ // Color changed
-    color = CRGB(param[0].asInt(),param[1].asInt(), param[2].asInt());
-    color.maximizeBrightness(100);
-    dimmedColor = color;
-    dimmedColor.fadeToBlackBy(256 - slider2/4);
-    saveVariables();
-}
-
-BLYNK_WRITE(AlarmaPIN){ // Alarm settings changed
-    deleteTimers();
-
-    for (int i = 0; i<NUM_LEDS; i++){
-        leds[i] = CRGB(0,0,10);
-    }
-    FastLED.show();
-
-    alarmaON = param.asInt();
-    saveVariables();
-
-    delay(1000);
-    for (int i = 0; i<NUM_LEDS; i++){
-        leds[i] = CRGB(0,0,0);
-    }
-    FastLED.show();
-    makeTimers();
-}
-
-BLYNK_WRITE(timePIN) { // Alarm settings
-    for (int i = 0; i<NUM_LEDS; i++){
-        leds[i] = CRGB(0,10,0);
-    }
-    FastLED.show();
-    TimeInputParam t(param);
-
-    if (t.hasStartTime()){
-        hora_obj = t.getStartHour();
-        minuto_obj = t.getStartMinute();
-    }
-
-    if (t.getStartSecond() < 10) {
-        alarmaON = 1;
-    }
-
-    saveVariables();
-
-    delay(1000);
-    for (int i = 0; i<NUM_LEDS; i++){
-        leds[i] = CRGB(0,0,0);
-    }
-    FastLED.show();
-}
-
-BLYNK_WRITE(bombillaVirtualPIN) { // Main light switch
-    bombillaON = param.asInt();
-    digitalWrite(bombillaPhysicalPIN, bombillaON);
-}
-
-void handle_on() {
-    bombillaON = 1;
-    digitalWrite(bombillaPhysicalPIN, bombillaON);
-    Blynk.virtualWrite(6, bombillaON);
-    server.send(200, "text/plain", String(bombillaON)); // Return 1
-}
-
-void handle_off() {
-    bombillaON = 0;
-    digitalWrite(bombillaPhysicalPIN, bombillaON);
-    Blynk.virtualWrite(6, bombillaON);
-    server.send(200, "text/plain", String(bombillaON)); // Return 1
-}
-
-void handle_state() {
-  server.send(200, "text/plain", String(bombillaON)); // Return state
-}
+#include "BlynkHeader.h"            // Perform Blynk operations
+#include "ServerHeader.h"           // Perform Server operations
+#include "HomeKitHeader.h"          // Perform HomeBridge operations
 
 void setup()
 {
-    EEPROM.begin(512);
-    Serial.begin(9600);
-    Blynk.begin(auth, ssid, pass);
-    WiFi.begin(ssid, pass);
-    retrieveVariables();
-    pinMode(RelayPIN, OUTPUT);
+    EEPROM.begin(512);              // Initialize EEPROM ()
+    // Serial.begin(9600);
+    Blynk.begin(auth, ssid, pass);  // Blynk start
+    //WiFi.begin(ssid, pass);         // Wifi
+    retrieveVariables();            // Get variables from EEPROM
+
+    pinMode(relayPIN, OUTPUT);
     pinMode(DATA_PIN, OUTPUT);
 
-    FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
-    FastLED.setMaxPowerInMilliWatts(12000);
-    randomSeed(analogRead(A0));
+    FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);// LED strip
+    FastLED.setMaxPowerInMilliWatts(12000);             // 12 W max Power
+    randomSeed(analogRead(A0));                         // Random starting seed
 
-    leds[0] = CRGB(10,10,10);
+    leds[0] = CRGB(0,0,0);
 
-    while (Blynk.connect() == false) { // Wait for connection
-        for(int i = NUM_LEDS-1; i>0; i--){
+    while (Blynk.connect() == false) {      // Wait for connection
+        for(int i = NUM_LEDS-1; i>0; i--){  // Visual sequence
             leds[i] = leds[i-1];
         }
         FastLED.show();
-        delay(1);
     }
 
-    Blynk.notify("Device online!");
-
     for(int i = 0; i < NUM_LEDS ; i++) {
-        leds[i] = CRGB(0,0,0);
+        leds[i] = CRGB(0,0,0);      // Turn off all LEDs
     }
     FastLED.show();
 
@@ -511,16 +201,19 @@ void setup()
     Serial.println(WiFi.localIP());
 
     // Start the server
-    server.on("/status", handle_state);
-    server.on("/actions/ON", handle_on);
-    server.on("/actions/OFF", handle_off);
-    server.begin();
+    startServer();
     makeTimers();
+
+    // Over The Air updates
+    startOTA();
+
+    MDNS.begin("nodemcu");      // MDNS (nodemcu.local)
 }
 
 void loop()
 {
-    Blynk.run(); // Blynk functions
-    timer.run(); // Timers
-    server.handleClient(); // Incoming client connections
+    Blynk.run();            // Blynk internal functions
+    timer.run();            // Run timers
+    server.handleClient();  // Incoming client connections to server
+    ArduinoOTA.handle();    // OTA handling
 }
