@@ -667,3 +667,97 @@ void loop()
     server.handleClient(); // Incoming client connections
     ArduinoOTA.handle();
 }
+
+
+void saveVariables(){ // Save important variables into EEPROM
+    int address = 0;
+
+    EEPROM.put(address, objectiveTime);
+    address += sizeof(objectiveTime);
+
+    EEPROM.put(address, alarmaON);
+    address += sizeof(alarmaON);
+
+    EEPROM.put(address, color);
+    address += sizeof(color);
+
+    EEPROM.put(address, slider);
+    address += sizeof(slider);
+
+    EEPROM.put(address, slider2);
+    address += sizeof(slider2);
+
+    EEPROM.commit();
+}
+
+void retrieveVariables(){ // Retrieve important variables from EEPROM and Initialize dependent variables
+    int address = 0;
+    EEPROM.get(address, hora_obj);
+    address += sizeof(hora_obj);
+    EEPROM.get(address, minuto_obj);
+    address += sizeof(minuto_obj);
+    EEPROM.get(address, alarmaON);
+    address += sizeof(alarmaON);
+    EEPROM.get(address, color);
+    address += sizeof(color);
+    EEPROM.get(address, slider);
+    address += sizeof(slider);
+    EEPROM.get(address, slider2);
+    address += sizeof(slider2);
+
+    if(menu<1){
+        menu = 1;
+    }
+
+    menu = 1;
+    counter = 0;
+    secondCounter = 0;
+    color.maximizeBrightness(100);
+    dimmedColor = color;
+    dimmedColor.fadeToBlackBy(256 - slider2/4);
+
+    Serial.println(" \nVariables retrieved: ");
+    Serial.print("objHour - ");
+    Serial.print(hora_obj);
+    Serial.print(" objMin - ");
+    Serial.print(minuto_obj);
+    Serial.print(" alarmON - ");
+    Serial.print(alarmaON);
+    Serial.print(" color - (");
+    Serial.print(color.r);
+    Serial.print(",");
+    Serial.print(color.g);
+    Serial.print(",");
+    Serial.print(color.b);
+    Serial.print(") s1 - ");
+    Serial.print(slider);
+    Serial.print(" s2 - ");
+    Serial.println(slider2);
+}
+
+void saveVariables(){ // Save important variables into EEPROM
+    int address = 0;
+
+    EEPROM.put(address, color);
+    address += sizeof(color);
+
+    EEPROM.put(address, objectiveTime);
+    address += sizeof(objectiveTime);
+
+    EEPROM.put(address, menu);
+    address += sizeof(menu);
+
+    EEPROM.put(address, vSlider);
+    address += sizeof(vSlider);
+
+    EEPROM.put(address, hSlider);
+    address += sizeof(hSlider);
+
+    EEPROM.put(address, alarmON);
+    address += sizeof(alarmON);
+
+    EEPROM.put(address, relayON);
+    address += sizeof(relayON);
+
+    EEPROM.commit();
+}
